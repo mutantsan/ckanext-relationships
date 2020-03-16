@@ -1,0 +1,2 @@
+graphene>=2.1.8
+flask_graphql>=2.0.1
