@@ -7,13 +7,14 @@ import ckanext.relationships.interfaces as interfaces
 from ckan.logic.schema import default_create_package_schema
 from .views import get_blueprints
 from ckanext.relationships.logic.schema import default_relationship_schema
-
+from ckanext.relationships.cli import get_commands
 
 class RelationshipsPlugin(p.SingletonPlugin):
     p.implements(p.IConfigurer)
     p.implements(p.IBlueprint)
     p.implements(p.IActions)
     p.implements(p.IAuthFunctions)
+    p.implements(p.IClick)
     # p.implements(p.IDatasetForm)
     p.implements(interfaces.IRelationships, inherit=True)
 
