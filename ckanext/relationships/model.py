@@ -1,7 +1,9 @@
 # encoding: utf-8
+import logging
 
 from sqlalchemy import orm, types, Column, Table, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relation
 
 import ckan.plugins as p
 
@@ -11,26 +13,28 @@ from ckan.model import core
 from ckan.model import package as _package
 from ckan.model import types as _types
 from ckan.model import domain_object
-from ckan.model.meta import metadata
+from ckan.model.meta import metadata, engine
 
-import logging
+from .interfaces import IRelationships
 
 Base = declarative_base(metadata=metadata)
 
-
-__all__ = ['PackageRelationship', 'package_relationship_table',]
-
-package_relationship_table = Table('package_relationship', meta.metadata,
-     Column('id', types.UnicodeText, primary_key=True, default=_types.make_uuid),
-     Column('subject_package_id', types.UnicodeText, ForeignKey('package.id')),
-     Column('object_package_id', types.UnicodeText, ForeignKey('package.id')),
-     Column('type', types.UnicodeText),
-     Column('comment', types.UnicodeText),
-     Column('state', types.UnicodeText, default=core.State.ACTIVE),
-     )
+__all__ = ['PackageRelationship', 'Relationship', ]
 
 
 log = logging.getLogger(__name__)
+
+
+class Relationship(Base):
+    __tablename__ = 'package_relationship_dev'
+
+    _id = Column('id', types.UnicodeText, primary_key=True,
+                 default=_types.make_uuid)
+    subject_package_id = Column(types.UnicodeText, ForeignKey('package.id'))
+    object_package_id = Column(types.UnicodeText, ForeignKey('package.id'))
+    _type = Column('type', types.UnicodeText)
+    comment = Column(types.UnicodeText)
+    state = Column(types.UnicodeText, default=core.State.ACTIVE)
 
 
 class PackageRelationship(core.StatefulObjectMixin,
@@ -44,9 +48,6 @@ class PackageRelationship(core.StatefulObjectMixin,
     # List of (type, corresponding_reverse_type)
     # e.g. (A is "child_of" B, B is a "parent_of" A)
     # don't forget to add specs to Solr's schema.xml
-
-
-    
     # types = [(u'depends_on', u'dependency_of'),
     #          (u'derives_from', u'has_derivation'),
     #          (u'links_to', u'linked_from'),
@@ -56,7 +57,7 @@ class PackageRelationship(core.StatefulObjectMixin,
         (u'child_of', u'parent_of'),
         (u'sibling_of', u'sibling_of')
     ]
-    for plugin in p.PluginImplementations(interfaces.IRelationships):
+    for plugin in p.PluginImplementations(IRelationships):
         types = plugin.get_rel_types()
 
     # types_printable = \
@@ -69,8 +70,8 @@ class PackageRelationship(core.StatefulObjectMixin,
         (u'is a child of {}', u'is a parent of {}'),
         (u'is a sibling of {}', u'is a sibling of {}')
     ]
-        
-    for plugin in p.PluginImplementations(interfaces.IRelationships):
+
+    for plugin in p.PluginImplementations(IRelationships):
         types = plugin.get_printable_rel_types()
 
     # inferred_types_printable = \
@@ -99,10 +100,12 @@ class PackageRelationship(core.StatefulObjectMixin,
             relationship_type = self.forward_to_reverse_type(self.type)
         subject_ref = getattr(subject_pkg, ref_package_by)
         object_ref = getattr(object_pkg, ref_package_by)
-        return {'subject':subject_ref,
-                'type':relationship_type,
-                'object':object_ref,
-                'comment':self.comment}
+        return {
+            'subject': subject_ref,
+            'type': relationship_type,
+            'object': object_ref,
+            'comment': self.comment
+        }
 
     def as_tuple(self, package):
         '''Returns basic relationship info as a tuple from the point of view
@@ -118,17 +121,19 @@ class PackageRelationship(core.StatefulObjectMixin,
             other_package = self.subject
         else:
             # FIXME do we want a more specific error
-            raise Exception('Package %s is not in this relationship: %s' % \
-                             (package, self))
+            raise Exception('Package %s is not in this relationship: %s' %
+                            (package, self))
         return (type_str, other_package)
 
     @classmethod
     def by_subject(cls, package):
-        return meta.Session.query(cls).filter(cls.subject_package_id==package.id)
+        return meta.Session.query(cls).filter(
+            cls.subject_package_id == package.id)
 
     @classmethod
     def by_object(cls, package):
-        return meta.Session.query(cls).filter(cls.object_package_id==package.id)
+        return meta.Session.query(cls).filter(
+            cls.object_package_id == package.id)
 
     @classmethod
     def get_forward_types(cls):
@@ -186,10 +191,26 @@ class PackageRelationship(core.StatefulObjectMixin,
                     return cls.types_printable[i][j]
         raise TypeError(type_)
 
-meta.mapper(PackageRelationship, package_relationship_table, properties={
-    'subject':orm.relation(_package.Package, primaryjoin=\
-           package_relationship_table.c.subject_package_id==_package.Package.id,
-           backref='relationships_as_subject'),
-    'object':orm.relation(_package.Package, primaryjoin=package_relationship_table.c.object_package_id==_package.Package.id,
-           backref='relationships_as_object'),
-    })
+
+meta.mapper(PackageRelationship, Relationship.__table__, properties={
+    'subject': orm.relation(_package.Package, primaryjoin=Relationship.__table__.c.subject_package_id == _package.Package.id,
+                            backref='relationships_as_subject'),
+    'object': orm.relation(_package.Package, primaryjoin=Relationship.__table__.c.object_package_id == _package.Package.id,
+                           backref='relationships_as_object'),
+})
+
+
+def create_tables():
+    """
+    Creates the necessary database tables
+    """
+    log.debug("Creating relationships database tables")
+    Base.metadata.create_all(engine)
+
+
+def drop_tables():
+    """
+    Drop all tables
+    """
+    log.debug("Deleting relationships database tables")
+    Base.metadata.drop_all(engine, tables=[Relationship.__table__, ])
